@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contexto</title>
+    <style>
+        body {
+            font-family: 'Noto Sans Thai', Arial, sans-serif;
+            background-color: #1a2526;
+            color: white;
+            text-align: center;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 20px;
+        }
+        .game-info {
+            font-size: 1.2em;
+            margin-bottom: 20px;
+        }
+        .input-container {
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            padding: 10px;
+            font-size: 1.2em;
+            width: 80%;
+            max-width: 400px;
+            border: none;
+            border-radius: 5px;
+            background-color: #2a3b3c;
+            color: white;
+            text-align: center;
+        }
+        input[type="text"]::placeholder {
+            color: #a0a0a0;
+        }
+        #latest-guess {
+            margin-top: 10px;
+            text-align: left;
+        }
+        #guesses {
+            margin-top: 20px;
+            text-align: left;
+        }
+        .guess {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 10px;
+            margin: 2px 0;
+            border-radius: 5px;
+            font-size: 1.2em;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1.2em;
+            margin: 10px;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1>CONTEXTO</h1>
+        <div class="game-info" id="gameInfo">GAME: #1 GUESSES: 0</div>
+        <div class="input-container">
+            <input type="text" id="guessInput" placeholder="type a word">
+        </div>
+        <div id="result"></div>
+        <div id="latest-guess"></div>
+        <div id="guesses"></div>
+        <button onclick="newGame()">New Game / เกมใหม่</button>
+    </div>
+
+    <script>
+        let guessCount = 0;
+        let gameNumber = 1;
+
+        // Function to interpolate between multiple color stops based on rank
+        function getColorForRank(rank) {
+            const maxRank = 5000; // Based on Contexto screenshot (e.g., rank 5021)
+            const normalized = Math.min(rank / maxRank, 1); // 0 (close) to 1 (far)
+
+            // Define color stops: green -> yellow -> orange -> red
+            const stops = [
+                { pos: 0.0, r: 76,  g: 175, b: 80  }, // Green (#4CAF50)
+                { pos: 0.1, r: 255, g: 235, b: 59  }, // Yellow (#FFEB3B)
+                { pos: 0.2, r: 255, g: 152, b: 0   }, // Orange (#FF9800)
+                { pos: 1.0, r: 244, g: 67,  b: 54  }  // Red (#F44336)
+            ];
+
+            // Find the two stops to interpolate between
+            let startStop = stops[0];
+            let endStop = stops[stops.length - 1];
+            for (let i = 0; i < stops.length - 1; i++) {
+                if (normalized >= stops[i].pos && normalized <= stops[i + 1].pos) {
+                    startStop = stops[i];
+                    endStop = stops[i + 1];
+                    break;
+                }
+            }
+
+            // Interpolate between the two stops
+            const t = (normalized - startStop.pos) / (endStop.pos - startStop.pos);
+            const r = Math.round(startStop.r + t * (endStop.r - startStop.r));
+            const g = Math.round(startStop.g + t * (endStop.g - startStop.g));
+            const b = Math.round(startStop.b + t * (endStop.b - startStop.b));
+
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+
+        async function makeGuess() {
+            const guess = document.getElementById('guessInput').value.trim();
+            if (!guess) return;
+
+            guessCount++;
+            document.getElementById('gameInfo').innerText = `GAME: #${gameNumber} GUESSES: ${guessCount}`;
+
+            try {
+                const response = await fetch('/guess', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `guess=${encodeURIComponent(guess)}`
+                });
+                const data = await response.json();
+                console.log('Guess response:', data);
+
+                if (data.error) {
+                    document.getElementById('result').innerText = data.error;
+                    guessCount--;
+                    document.getElementById('gameInfo').innerText = `GAME: #${gameNumber} GUESSES: ${guessCount}`;
+                    return;
+                }
+
+                if (data.correct) {
+                    document.getElementById('result').innerText = `Correct! The word was "${data.target}". Top words: ${data.top_words.map(w => `${w.word} (${w.rank})`).join(', ')}`;
+                } else {
+                    document.getElementById('result').innerText = '';
+                }
+
+                // Display the most recent guess separately
+                const latestGuessDiv = document.getElementById('latest-guess');
+                latestGuessDiv.innerHTML = '';
+                const latestRank = data.latest_guess.rank;
+                const latestColor = getColorForRank(latestRank);
+                latestGuessDiv.innerHTML = `<div class="guess" style="background-color: ${latestColor}"><span>${data.latest_guess.word}</span><span>${latestRank}</span></div>`;
+
+                // Display all guesses (sorted by rank, excluding the latest)
+                const guessesDiv = document.getElementById('guesses');
+                guessesDiv.innerHTML = '';
+                const previousGuesses = data.guesses.filter(g => g.word !== data.latest_guess.word);
+                previousGuesses.forEach(g => {
+                    const rank = g.rank;
+                    const color = getColorForRank(rank);
+                    guessesDiv.innerHTML += `<div class="guess" style="background-color: ${color}"><span>${g.word}</span><span>${rank}</span></div>`;
+                });
+            } catch (error) {
+                console.error('Error submitting guess:', error);
+                document.getElementById('result').innerText = 'Error submitting guess. Please try again.';
+                guessCount--;
+                document.getElementById('gameInfo').innerText = `GAME: #${gameNumber} GUESSES: ${guessCount}`;
+            }
+
+            document.getElementById('guessInput').value = '';
+            document.getElementById('guessInput').focus();
+        }
+
+        async function newGame() {
+            try {
+                const response = await fetch('/new_game', { method: 'POST' });
+                const data = await response.json();
+                console.log('New game response:', data);
+                guessCount = 0;
+                gameNumber++;
+                document.getElementById('gameInfo').innerText = `GAME: #${gameNumber} GUESSES: ${guessCount}`;
+                document.getElementById('result').innerText = 'New game started! / เริ่มเกมใหม่!';
+                document.getElementById('latest-guess').innerHTML = '';
+                document.getElementById('guesses').innerHTML = '';
+                document.getElementById('guessInput').value = '';
+                document.getElementById('guessInput').focus();
+            } catch (error) {
+                console.error('Error starting new game:', error);
+                document.getElementById('result').innerText = 'Error starting new game. Please try again.';
+            }
+        }
+
+        // Allow Enter key to submit guess
+        document.getElementById('guessInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') makeGuess();
+        });
+
+        // Focus on input box when the page loads
+        window.onload = () => {
+            document.getElementById('guessInput').focus();
+        };
+    </script>
+</body>
+</html>
